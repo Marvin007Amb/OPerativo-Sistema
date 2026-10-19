@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planificador de procesos</title>
+<style>
+  :root {
+    --bg: #f4f6f9; --card: #ffffff; --ink: #1c2530; --muted: #66758a; --line: #dde3ea;
+    --accent: #2457d6; --accent-soft: #e8eefc; --err: #c0392b; --err-soft: #fdecea; --idle: #e3e7ec;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 28px 16px 56px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 22px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 18px; }
+  .card h2 { font-size: 16px; margin: 0 0 14px; }
+  .hint { color: var(--muted); font-size: 13.5px; margin: -4px 0 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--muted); }
+  input[type=number] { font: inherit; color: var(--ink); padding: 8px 10px; border: 1px solid var(--line);
+    border-radius: 8px; background: #fff; width: 150px; }
+  input.small { width: 100px; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input.invalid { border-color: var(--err); background: var(--err-soft); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg input { display: none; }
+  .seg label { padding: 8px 14px; cursor: pointer; font-size: 14px; color: var(--ink); background: #fff; }
+  .seg input:checked + label { background: var(--accent); color: #fff; }
+  .seg label + input + label { border-left: 1px solid var(--line); }
+  button { font: inherit; padding: 9px 18px; border-radius: 8px; border: 1px solid var(--accent);
+    background: var(--accent); color: #fff; cursor: pointer; }
+  button.ghost { background: #fff; color: var(--accent); }
+  button:hover { filter: brightness(.95); }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { padding: 8px 10px; text-align: center; border-bottom: 1px solid var(--line); }
+  th { font-size: 12.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+  .tag { display: inline-block; min-width: 34px; padding: 3px 10px; border-radius: 6px; font-weight: 700;
+    border: 1px solid rgba(0,0,0,.15); }
+  #entrada td input { width: 110px; text-align: center; }
+  #errores { background: var(--err-soft); color: var(--err); border: 1px solid #f3c2bc; border-radius: 8px;
+    padding: 10px 14px; margin-top: 14px; font-size: 14px; }
+  #errores ul { margin: 4px 0 0; padding-left: 18px; }
+  .hidden { display: none !important; }
+  .actions { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .gantt-scroll { overflow-x: auto; padding: 4px 4px 34px; }
+  .gantt { display: flex; width: max-content; }
+  .cell { position: relative; height: 54px; }
+  .blk { height: 100%; border-radius: 4px; border: 1px solid rgba(0,0,0,.18); display: flex;
+    align-items: center; justify-content: center; font-weight: 700; font-size: 16px; }
+  .blk.idle { background: repeating-linear-gradient(45deg, var(--idle), var(--idle) 6px, #f1f3f6 6px, #f1f3f6 12px);
+    color: var(--muted); font-weight: 500; }
+  .tick { position: absolute; top: 60px; left: 0; font-size: 12px; color: var(--muted); }
+  .tick.end { left: auto; right: -4px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .stat { background: var(--accent-soft); border-radius: 10px; padding: 12px 14px; }
+  .stat .v { font-size: 24px; font-weight: 700; color: var(--accent); }
+  .stat .k { font-size: 12.5px; color: var(--muted); }
+  tfoot td { font-weight: 700; background: #f7f9fc; border-bottom: none; }
+  .rojo { color: #d00000; }
+  .formulas { color: var(--muted); font-size: 13.5px; margin-top: 12px; line-height: 1.7; }
+  .formulas b { color: var(--ink); }
+  .table-scroll { overflow-x: auto; }
+  @media print { .no-print { display: none !important; } body { background: #fff; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Planificador de procesos</h1>
+  <p class="sub">Round Robin (Ronda) y Tiempo restante m&aacute;s corto (SRTF) &middot; ingreso manual de datos</p>
+
+  <section class="card no-print">
+    <h2>1. Configuraci&oacute;n</h2>
+    <div class="row">
+      <div class="field">
+        Algoritmo
+        <div class="seg">
+          <input type="radio" name="algo" id="a-rr" value="rr" checked><label for="a-rr">Round Robin</label>
+          <input type="radio" name="algo" id="a-srtf" value="srtf"><label for="a-srtf">SRTF</label>
+        </div>
+      </div>
+      <label class="field" id="campo-quantum">Quantum (1-20)
+        <input type="number" id="quantum" class="small" min="1" max="20" step="1" placeholder="Ej. 2">
+      </label>
+      <label class="field">N&uacute;mero de procesos (1-26)
+        <input type="number" id="n" class="small" min="1" max="26" step="1" value="7">
+      </label>
+    </div>
+  </section>
+
+  <section class="card no-print">
+    <h2>2. Datos de los procesos</h2>
+    <p class="hint">Escriba aqu&iacute; sus propios datos: llegada de 0 a 20 y CPU de 1 a 20. Cambie el n&uacute;mero de procesos para agregar o quitar filas.</p>
+    <div class="table-scroll">
+      <table id="entrada">
+        <thead>
+          <tr><th>Proceso</th><th>Tiempo de llegada (0-20)</th><th>Tiempo de CPU (1-20)</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="errores" class="hidden" role="alert"></div>
+    <div class="actions">
+      <button id="btn-calcular">Calcular y graficar</button>
+      <button id="btn-limpiar" class="ghost">Limpiar datos</button>
+    </div>
+  </section>
+
+  <div id="resultados" class="hidden">
+    <section class="card">
+      <h2 id="titulo-res"></h2>
+      <div class="gantt-scroll"><div class="gantt" id="gantt"></div></div>
+    </section>
+
+    <div class="stats" id="stats"></div>
+
+    <section class="card">
+      <h2>Tabla de resultados</h2>
+      <div class="table-scroll">
+        <table id="tabla">
+          <thead>
+            <tr>
+              <th>Proceso</th><th>T. Llegada</th><th>T. CPU</th><th>T. Final</th>
+              <th>T. Retorno</th><th>T. Espera</th><th>T. Promedio</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+      <div class="formulas">
+        <b>T. Final</b> = instante en que termina el proceso &nbsp;&middot;&nbsp;
+        <b>T. Retorno</b> = Final &minus; Llegada &nbsp;&middot;&nbsp;
+        <b>T. Espera</b> = Retorno &minus; CPU &nbsp;&middot;&nbsp;
+        <b>T. Promedio</b> = Retorno &divide; CPU
+      </div>
+      <div class="actions no-print"><button class="ghost" onclick="window.print()">Imprimir / guardar PDF</button></div>
+    </section>
+  </div>
+</div>
+
+<script>
+const MAX_VAL = 20;
+const COLORES_BASE = ['#9bbb59', '#c00000', '#ffff00', '#ed7d31', '#7030a0', '#00b050', '#92d0e0'];
+// Datos enviados desde Java (null = formulario vacio)
+const DATOS_INICIALES = {algo:'srtf',quantum:0,llegadas:[2, 3, 0, 5, 9, 7, 12],cpus:[1, 5, 4, 3, 2, 4, 1]};
+
+/* ------------------------------ Algoritmos ------------------------------ */
+function nombreProceso(i) {
+  return String.fromCharCode(65 + i);
+}
+
+function nuevoProceso(nombre, llegada, cpu) {
+  return { nombre: nombre, llegada: llegada, cpu: cpu, restante: cpu, inicio: -1, fin: -1 };
+}
+
+/* Ronda (Round Robin). Si un proceso llega justo cuando termina un quantum,
+   entra a la cola ANTES que el proceso que fue expulsado. */
+function ronda(procesos, quantum) {
+  const pend = procesos.slice().sort((a, b) =>
+    a.llegada - b.llegada || (a.nombre < b.nombre ? -1 : a.nombre > b.nombre ? 1 : 0));
+  const linea = [];
+  const cola = [];
+  let t = 0, idx = 0, terminados = 0;
+  const n = pend.length;
+
+  while (idx < n && pend[idx].llegada <= t) cola.push(pend[idx++]);
+
+  while (terminados < n) {
+    if (cola.length === 0) {
+      const tSig = pend[idx].llegada;
+      linea.push({ ini: t, fin: tSig, nombre: '-' });
+      t = tSig;
+      while (idx < n && pend[idx].llegada <= t) cola.push(pend[idx++]);
+      continue;
+    }
+    const p = cola.shift();
+    if (p.inicio < 0) p.inicio = t;
+    const ejec = Math.min(quantum, p.restante);
+    linea.push({ ini: t, fin: t + ejec, nombre: p.nombre });
+    t += ejec;
+    p.restante -= ejec;
+    while (idx < n && pend[idx].llegada <= t) cola.push(pend[idx++]);
+    if (p.restante > 0) {
+      cola.push(p);
+    } else {
+      p.fin = t;
+      terminados++;
+    }
+  }
+  return linea;
+}
+
+/* Tiempo restante mas corto (apropiativo). Desempate: el que llego primero. */
+function srtf(procesos) {
+  const linea = [];
+  let t = 0, terminados = 0;
+  const n = procesos.length;
+
+  while (terminados < n) {
+    let elegido = null;
+    for (const p of procesos) {
+      if (p.restante > 0 && p.llegada <= t) {
+        if (elegido === null
+            || p.restante < elegido.restante
+            || (p.restante === elegido.restante && p.llegada < elegido.llegada)
+            || (p.restante === elegido.restante && p.llegada === elegido.llegada
+                && p.nombre < elegido.nombre)) {
+          elegido = p;
+        }
+      }
+    }
+    if (elegido === null) {
+      let tSig = Infinity;
+      for (const p of procesos) {
+        if (p.restante > 0 && p.llegada < tSig) tSig = p.llegada;
+      }
+      linea.push({ ini: t, fin: tSig, nombre: '-' });
+      t = tSig;
+      continue;
+    }
+    if (elegido.inicio < 0) elegido.inicio = t;
+
+    const ultimo = linea.length ? linea[linea.length - 1] : null;
+    if (ultimo && ultimo.nombre === elegido.nombre && ultimo.fin === t) {
+      ultimo.fin = t + 1;
+    } else {
+      linea.push({ ini: t, fin: t + 1, nombre: elegido.nombre });
+    }
+    elegido.restante--;
+    t++;
+    if (elegido.restante === 0) {
+      elegido.fin = t;
+      terminados++;
+    }
+  }
+  return linea;
+}
+
+function metricas(p) {
+  const retorno = p.fin - p.llegada;
+  return { retorno: retorno, espera: retorno - p.cpu, promedio: retorno / p.cpu };
+}
+
+/* ------------------------------ Interfaz ------------------------------ */
+const $ = (id) => document.getElementById(id);
+
+function hslAHex(h, s, l) {
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => {
+    const k = (n + h / 30) % 12;
+    const c = l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
+    return Math.round(255 * c).toString(16).padStart(2, '0');
+  };
+  return '#' + f(0) + f(8) + f(4);
+}
+
+function colorProceso(i) {
+  if (i < COLORES_BASE.length) return COLORES_BASE[i];
+  return hslAHex((i * 47) % 360, 0.55, 0.62);
+}
+
+function colorTexto(hex) {
+  const r = parseInt(hex.substr(1, 2), 16), g = parseInt(hex.substr(3, 2), 16), b = parseInt(hex.substr(5, 2), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#1c2530' : '#ffffff';
+}
+
+function etiqueta(nombre, i) {
+  const bg = colorProceso(i);
+  return '<span class="tag" style="background:' + bg + ';color:' + colorTexto(bg) + '">' + nombre + '</span>';
+}
+
+function leerEntero(texto, min, max) {
+  const t = String(texto).trim();
+  if (!/^-?[0-9]+$/.test(t)) return { error: 'debe ser un n&uacute;mero entero' };
+  const v = parseInt(t, 10);
+  if (v < min || v > max) return { error: 'debe estar entre ' + min + ' y ' + max };
+  return { valor: v };
+}
+
+function cantidadProcesos() {
+  const r = leerEntero($('n').value, 1, 26);
+  return r.error ? null : r.valor;
+}
+
+function construirEntrada() {
+  const n = cantidadProcesos();
+  if (n === null) return;
+  const tbody = document.querySelector('#entrada tbody');
+  const previos = Array.from(tbody.querySelectorAll('tr')).map(tr => {
+    const ins = tr.querySelectorAll('input');
+    return [ins[0].value, ins[1].value];
+  });
+  tbody.innerHTML = '';
+  for (let i = 0; i < n; i++) {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + etiqueta(nombreProceso(i), i) + '</td>' +
+      '<td><input type="number" min="0" max="' + MAX_VAL + '" step="1" aria-label="Llegada ' + nombreProceso(i) + '"></td>' +
+      '<td><input type="number" min="1" max="' + MAX_VAL + '" step="1" aria-label="CPU ' + nombreProceso(i) + '"></td>';
+    const ins = tr.querySelectorAll('input');
+    if (previos[i]) { ins[0].value = previos[i][0]; ins[1].value = previos[i][1]; }
+    tbody.appendChild(tr);
+  }
+}
+
+function mostrarErrores(lista) {
+  const box = $('errores');
+  if (!lista.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  box.classList.remove('hidden');
+  box.innerHTML = '<b>Revise los datos:</b><ul>' + lista.map(e => '<li>' + e + '</li>').join('') + '</ul>';
+}
+
+function recolectar() {
+  const errores = [];
+  document.querySelectorAll('input.invalid').forEach(i => i.classList.remove('invalid'));
+
+  const n = cantidadProcesos();
+  if (n === null) {
+    $('n').classList.add('invalid');
+    errores.push('El n&uacute;mero de procesos debe ser un entero entre 1 y 26.');
+    return { errores: errores };
+  }
+
+  const algo = document.querySelector('input[name=algo]:checked').value;
+  let quantum = null;
+  if (algo === 'rr') {
+    const q = leerEntero($('quantum').value, 1, MAX_VAL);
+    if (q.error) {
+      $('quantum').classList.add('invalid');
+      errores.push('Quantum: ' + q.error + '.');
+    } else quantum = q.valor;
+  }
+
+  const procesos = [];
+  document.querySelectorAll('#entrada tbody tr').forEach((tr, i) => {
+    const ins = tr.querySelectorAll('input');
+    const nom = nombreProceso(i);
+    const ll = leerEntero(ins[0].value, 0, MAX_VAL);
+    const cp = leerEntero(ins[1].value, 1, MAX_VAL);
+    if (ll.error) { ins[0].classList.add('invalid'); errores.push('Proceso ' + nom + ', llegada: ' + ll.error + '.'); }
+    if (cp.error) { ins[1].classList.add('invalid'); errores.push('Proceso ' + nom + ', CPU: ' + cp.error + '.'); }
+    if (!ll.error && !cp.error) procesos.push(nuevoProceso(nom, ll.valor, cp.valor));
+  });
+
+  return { errores: errores, algo: algo, quantum: quantum, procesos: procesos };
+}
+
+function fmt(x) { return x.toFixed(2); }
+
+/* Una celda por unidad de tiempo, como en el ejemplo del enunciado */
+function dibujarGantt(linea) {
+  const UNIDAD = 38;
+  const g = $('gantt');
+  g.innerHTML = '';
+  const total = linea[linea.length - 1].fin;
+
+  linea.forEach((seg) => {
+    for (let t = seg.ini; t < seg.fin; t++) {
+      const cel = document.createElement('div');
+      cel.className = 'cell';
+      cel.style.width = UNIDAD + 'px';
+      const blk = document.createElement('div');
+      const libre = seg.nombre === '-';
+      blk.className = 'blk' + (libre ? ' idle' : '');
+      blk.textContent = seg.nombre;
+      blk.title = (libre ? 'CPU libre' : seg.nombre) + ': ' + t + ' a ' + (t + 1);
+      if (!libre) {
+        const bg = colorProceso(seg.nombre.charCodeAt(0) - 65);
+        blk.style.background = bg;
+        blk.style.color = colorTexto(bg);
+      }
+      cel.appendChild(blk);
+      const tk = document.createElement('span');
+      tk.className = 'tick';
+      tk.textContent = t;
+      cel.appendChild(tk);
+      if (t === total - 1) {
+        const tf = document.createElement('span');
+        tf.className = 'tick end';
+        tf.textContent = total;
+        cel.appendChild(tf);
+      }
+      g.appendChild(cel);
+    }
+  });
+}
+
+function stat(v, k) {
+  return '<div class="stat"><div class="v">' + v + '</div><div class="k">' + k + '</div></div>';
+}
+
+function dibujarTabla(procesos) {
+  const tbody = document.querySelector('#tabla tbody');
+  const tfoot = document.querySelector('#tabla tfoot');
+  tbody.innerHTML = '';
+  let sRet = 0, sEsp = 0, sProm = 0;
+
+  procesos.forEach((p, i) => {
+    const m = metricas(p);
+    sRet += m.retorno; sEsp += m.espera; sProm += m.promedio;
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + etiqueta(p.nombre, i) + '</td>' +
+      '<td>' + p.llegada + '</td><td>' + p.cpu + '</td><td><b>' + p.fin + '</b></td>' +
+      '<td>' + m.retorno + '</td><td>' + m.espera + '</td><td>' + fmt(m.promedio) + '</td>';
+    tbody.appendChild(tr);
+  });
+
+  const n = procesos.length;
+  tfoot.innerHTML =
+    '<tr><td>Promedios</td><td></td><td></td><td></td>' +
+    '<td>' + fmt(sRet / n) + '</td><td>' + fmt(sEsp / n) + '</td><td class="rojo">' + fmt(sProm / n) + '</td></tr>';
+
+  $('stats').innerHTML =
+    stat(fmt(sRet / n), 'Retorno promedio') +
+    stat(fmt(sEsp / n), 'Espera promedio') +
+    stat(fmt(sProm / n), 'T. Promedio (Retorno &divide; CPU)');
+}
+
+function calcular(desplazar) {
+  const d = recolectar();
+  mostrarErrores(d.errores);
+  if (d.errores.length) { $('resultados').classList.add('hidden'); return; }
+
+  const linea = d.algo === 'rr' ? ronda(d.procesos, d.quantum) : srtf(d.procesos);
+  $('titulo-res').innerHTML = d.algo === 'rr'
+    ? 'Round Robin &middot; Quantum = ' + d.quantum + ' &middot; ' + d.procesos.length + ' procesos'
+    : 'Tiempo restante m&aacute;s corto (SRTF) &middot; ' + d.procesos.length + ' procesos';
+
+  $('resultados').classList.remove('hidden');
+  dibujarGantt(linea);
+  dibujarTabla(d.procesos);
+  if (desplazar && $('resultados').scrollIntoView) {
+    $('resultados').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
+function limpiar() {
+  document.querySelectorAll('#entrada input').forEach(i => { i.value = ''; i.classList.remove('invalid'); });
+  $('quantum').value = '';
+  $('quantum').classList.remove('invalid');
+  $('n').classList.remove('invalid');
+  mostrarErrores([]);
+  $('resultados').classList.add('hidden');
+}
+
+function actualizarAlgoritmo() {
+  const rr = document.querySelector('input[name=algo]:checked').value === 'rr';
+  $('campo-quantum').classList.toggle('hidden', !rr);
+}
+
+document.querySelectorAll('input[name=algo]').forEach(r => r.addEventListener('change', actualizarAlgoritmo));
+$('n').addEventListener('input', construirEntrada);
+$('btn-calcular').addEventListener('click', () => calcular(true));
+$('btn-limpiar').addEventListener('click', limpiar);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type === 'number') calcular(true);
+});
+
+function iniciar() {
+  const d = DATOS_INICIALES;
+  if (d) {
+    document.getElementById(d.algo === 'srtf' ? 'a-srtf' : 'a-rr').checked = true;
+    $('n').value = d.llegadas.length;
+    if (d.quantum > 0) $('quantum').value = d.quantum;
+  }
+  actualizarAlgoritmo();
+  construirEntrada();
+  if (d) {
+    document.querySelectorAll('#entrada tbody tr').forEach((tr, i) => {
+      const ins = tr.querySelectorAll('input');
+      ins[0].value = d.llegadas[i];
+      ins[1].value = d.cpus[i];
+    });
+    calcular(false);
+  }
+}
+iniciar();
+</script>
+</body>
+</html>
